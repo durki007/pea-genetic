@@ -1,6 +1,6 @@
 <component name="ProjectRunConfigurationManager">
   <configuration default="false" name="Run rbg403.astp" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
-    <option name="command" value="run --package pea-genetic --bin pea-genetic -- -i G:\pea-genetic\sample-tsp\rbg403.atsp" />
+    <option name="command" value="run --package pea-genetic --bin pea-genetic -- -i G:\pea-genetic\sample-tsp\rbg403.atsp -y scramble -t ox" />
     <option name="workingDirectory" value="file://$PROJECT_DIR$" />
     <envs />
     <option name="emulateTerminal" value="true" />

@@ -11,11 +11,14 @@ pub struct GAParameters {
     pub crossover_type: CrossoverType,
 }
 
+const MUTATION_STRENGTH: f64 = 0.1;
+
 pub enum MutationType {
-    Swap,
-    Inversion,
-    Scramble,
+    TwoOptSwap,
+    FourOptSwap,
+    Reversion,
     Insertion,
+    Scramble,
 }
 
 pub enum CrossoverType {
@@ -24,28 +27,13 @@ pub enum CrossoverType {
     CX,
 }
 
-pub enum SelectionType {
-    // Tournament selection, requires tournament size
-    Tournament,
-    // Roulette selection, requires nothing
-    Roulette,
-    // Stochastic Universal Sampling, requires nothing
-    SUS,
-}
-
-struct SelectionCount {
-    mutation: usize,
-    crossover: usize,
-    elitism: usize,
-}
-
 pub fn genetic_tsp(graph: &MatrixGraph, params: &GAParameters) -> Vec<usize> {
     let mut population = generate_initial_population(graph, params.population_size);
-    let mut fitness: Vec<isize> = Vec::with_capacity(params.population_size);
+    // let mut fitness: Vec<isize> = Vec::with_capacity(params.population_size);
     let mut all_time_best: isize = isize::MAX;
 
     for i in 0..params.max_generations {
-        fitness = calculate_fitness(graph, &population);
+        let fitness = calculate_fitness(graph, &population);
         let mut sort_lookup = sequence_vector(params.population_size);
         sort_lookup.sort_by(|a, b| fitness[*a].cmp(&fitness[*b]));
         // Cross-over
@@ -80,23 +68,53 @@ pub fn genetic_tsp(graph: &MatrixGraph, params: &GAParameters) -> Vec<usize> {
 
 fn mutate_in_place(path: &mut Vec<usize>, params: &GAParameters) {
     match params.mutation_type {
-        MutationType::Swap => swap_mutate(path),
-        MutationType::Inversion => inversion_mutate(path),
-        MutationType::Scramble => scramble_mutate(path),
+        MutationType::FourOptSwap => swap_mutate(path),
+        MutationType::TwoOptSwap => two_opt_swap_mutate(path),
+        MutationType::Reversion => reversion_mutate(path),
         MutationType::Insertion => insertion_mutate(path),
+        MutationType::Scramble => scramble_mutate(path),
     }
 }
 
-fn insertion_mutate(p0: &mut Vec<usize>) {
-    todo!()
+fn insertion_mutate(path: &mut Vec<usize>) {
+    let segment_size = (path.len() as f64 * MUTATION_STRENGTH).floor() as usize;
+    let segment_start = rand::thread_rng().gen_range(0..path.len() - segment_size);
+    let insert_point = rand::thread_rng().gen_range(0..path.len() - segment_size);
+    let mut tmp: Vec<usize> = Vec::with_capacity(path.len());
+    for i in 0..segment_start {
+        tmp.push(path[i]);
+    }
+    for i in segment_start + segment_size..path.len() {
+        tmp.push(path[i]);
+    }
+    for i in 0..segment_size {
+        tmp.insert(insert_point + i, path[segment_start + i]);
+    }
+    assert_eq!(tmp.len(), path.len());
+    // Change
+    for i in 0..path.len() {
+        path[i] = tmp[i];
+    }
 }
 
-fn scramble_mutate(p0: &mut Vec<usize>) {
-    todo!()
-}
-
-fn inversion_mutate(p0: &mut Vec<usize>) {
-    todo!()
+fn reversion_mutate(path: &mut Vec<usize>) {// reverse
+    let segment_size = (path.len() as f64 * MUTATION_STRENGTH).floor() as usize;
+    let segment_start = rand::thread_rng().gen_range(0..path.len() - segment_size);
+    let mut tmp: Vec<usize> = Vec::with_capacity(path.len());
+    for i in 0..segment_start {
+        tmp.push(path[i]);
+    }
+    for i in (segment_start..segment_start + segment_size).rev() {
+        tmp.push(path[i]);
+    }
+    for i in segment_start + segment_size..path.len() {
+        tmp.push(path[i]);
+    }
+    assert_eq!(tmp.len(), path.len());
+    // Change
+    for i in 0..path.len() {
+        path[i] = tmp[i];
+    }
 }
 
 fn swap_mutate(path: &mut Vec<usize>) {
@@ -109,18 +127,52 @@ fn swap_mutate(path: &mut Vec<usize>) {
     path[point2] = tmp;
 }
 
+fn two_opt_swap_mutate(path: &mut Vec<usize>) {
+    // Choose two random points
+    let segment_size = (path.len() as f64 * MUTATION_STRENGTH).floor() as usize;
+    let point1 = rand::thread_rng().gen_range(0..path.len() - segment_size);
+    let point2 = rand::thread_rng().gen_range(point1..path.len());
+    let mut tmp: Vec<usize> = Vec::with_capacity(path.len());
+    for i in 0..point1 {
+        tmp.push(path[i]);
+    }
+    for k in (point1..point2).rev() {
+        tmp.push(path[k]);
+    }
+    for i in point2..path.len() {
+        tmp.push(path[i]);
+    }
+    assert_eq!(tmp.len(), path.len());
+    // Change
+    for i in 0..path.len() {
+        path[i] = tmp[i];
+    }
+}
+
+fn scramble_mutate(path: &mut Vec<usize>) {
+    let swap_count = (path.len() as f64 * MUTATION_STRENGTH).floor() as usize;
+    for i in 0..swap_count {
+        swap_mutate(path);
+    }
+}
+
 fn crossover(population: &Vec<Vec<usize>>, pairs: &Vec<(usize, usize)>, params: &GAParameters) -> Vec<Vec<usize>> {
     let mut children = Vec::with_capacity(population.len());
     for i in 0..pairs.len() {
         let parent1 = &population[pairs[i].0];
         let parent2 = &population[pairs[i].1];
-        let child = one_point_crossover(parent1, parent2, params);
+        // let child = one_point_crossover(parent1, parent2, params);
+        let child = match params.crossover_type {
+            CrossoverType::PMX => one_point_crossover(parent1, parent2, params),
+            CrossoverType::OX => order_crossover(parent1, parent2, params),
+            CrossoverType::CX => cycle_crossover(parent1, parent2, params),
+        };
         children.push(child);
     }
     children
 }
 
-fn one_point_crossover(parent1: &Vec<usize>, parent2: &Vec<usize>, params: &GAParameters) -> Vec<usize> {
+fn one_point_crossover(parent1: &Vec<usize>, parent2: &Vec<usize>, _params: &GAParameters) -> Vec<usize> {
     let mut child = Vec::with_capacity(parent1.len());
     let crossover_point = rand::thread_rng().gen_range(1..parent1.len());
     for i in 0..crossover_point {
@@ -132,6 +184,39 @@ fn one_point_crossover(parent1: &Vec<usize>, parent2: &Vec<usize>, params: &GAPa
         child.push(x);
     }
     child
+}
+
+fn order_crossover(parent1: &Vec<usize>, parent2: &Vec<usize>, _params: &GAParameters) -> Vec<usize> {
+    let mut child: Vec<Option<usize>> = vec![None; parent1.len()];
+    let mut crossover_point1 = rand::thread_rng().gen_range(0..parent1.len());
+    let mut crossover_point2 = rand::thread_rng().gen_range(0..parent1.len());
+    if crossover_point1 > crossover_point2 {
+        let tmp = crossover_point1;
+        crossover_point1 = crossover_point2;
+        crossover_point2 = tmp;
+    }
+    for i in crossover_point1..crossover_point2 {
+        child[i] = Some(parent1[i]);
+    }
+    let mut unused: Vec<usize> = Vec::with_capacity(parent1.len());
+    parent2.iter().filter(|x| !child.contains(&Some(*x.clone()))).for_each(|x| unused.push(*x));
+    let mut unused_iter = unused.iter();
+    for i in 0..parent1.len() {
+        if child[i].is_none() {
+            child[i] = Some(*unused_iter.next().unwrap());
+        }
+    }
+    child.iter().map(|x| x.unwrap()).collect::<Vec<usize>>().clone()
+}
+
+fn cycle_crossover(parent1: &Vec<usize>, parent2: &Vec<usize>, _params: &GAParameters) -> Vec<usize> {
+    let mut child: Vec<Option<usize>> = vec![None; parent1.len()];
+    let mut cycle = 0;
+    let mut current = 0;
+    while child[current].is_none() {
+
+    }
+    child.iter().map(|x| x.unwrap()).collect::<Vec<usize>>().clone()
 }
 
 fn generate_crossover_pairs(fitness: &Vec<isize>, crossover_pair_count: usize) -> Vec<(usize, usize)> {
